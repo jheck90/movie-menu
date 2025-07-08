@@ -39,7 +39,6 @@
       background-color: #333;
     }
 
-    /* GRID VIEW */
     .grid {
       display: flex;
       flex-wrap: wrap;
@@ -49,17 +48,17 @@
       justify-content: center;
     }
 
-  .list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1rem;
-    justify-content: center;
-    max-width: 100vw;
-    padding: 0 1rem;
-    overflow-y: auto;
-    height: calc(100vh - 80px);
-    box-sizing: border-box;
-  }
+    .list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: center;
+      max-width: 100vw;
+      padding: 0 1rem;
+      overflow-y: auto;
+      height: calc(100vh - 80px);
+      box-sizing: border-box;
+    }
 
     .movie-tile {
       border: 2px solid transparent;
@@ -88,7 +87,6 @@
       transform: scale(1.1);
     }
 
-    /* Grid poster size */
     .grid .movie-tile {
       width: 150px;
       display: flex;
@@ -113,16 +111,14 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      cursor: pointer;
-
-      height: 400px; /* 360px image + ~40px label + margin */
+      height: 400px;
       box-sizing: border-box;
-      overflow: hidden; /* prevent content overflow */
+      overflow: hidden;
     }
 
     .list .movie-tile img {
       width: 100%;
-      height: 360px; /* fixed height for consistent size */
+      height: 360px;
       border-radius: 5px;
       object-fit: cover;
       margin-bottom: 0.5rem;
@@ -170,141 +166,139 @@
   </div>
 </div>
 
+<div id="movie-container" class="grid"></div>
 
-  <div id="movie-container" class="grid"></div>
+<script>
+  let movies = [];
+  let currentMovies = [];
+  let selected = new Set();
+  let gridMode = true;
 
-  <script>
-    let movies = [];           // full movie library
-    let currentMovies = [];    // currently displayed movies (library or list)
-    let selected = new Set();
-    let gridMode = true;
-
-async function fetchMovies() {
-  const res = await fetch('/api/movies');
-  movies = await res.json();
-  currentMovies = movies;   // default view is all movies
-  renderMovies();
-}
-
-async function fetchLists() {
-  const res = await fetch('/api/lists');
-  const lists = await res.json();
-  const dropdown = document.getElementById('listsDropdown');
-  dropdown.innerHTML = `<option value="">-- Select List --</option>`;
-  lists.forEach(name => {
-    const opt = document.createElement('option');
-    opt.value = name;
-    opt.textContent = name;
-    dropdown.appendChild(opt);
-  });
-}
-
-// Toggle grid/list views, re-render currentMovies
-function toggleView() {
-  gridMode = !gridMode;
-  const container = document.getElementById('movie-container');
-  container.className = gridMode ? 'grid' : 'list';
-  renderMovies();
-}
-
-    // Render currentMovies instead of raw 'movies'
-    function renderMovies() {
-      const container = document.getElementById("movie-container");
-      container.innerHTML = "";
-
-      currentMovies.forEach(movie => {
-        const div = document.createElement("div");
-        div.className = "movie-tile";
-
-        const img = document.createElement("img");
-        img.src = movie.poster || movie.poster_url || "/web/placeholder.jpg";
-        img.alt = movie.title;
-
-        const label = document.createElement("p");
-        label.textContent = movie.title;
-
-        div.appendChild(img);
-        div.appendChild(label);
-        container.appendChild(div);
-      });
-    }
-
-    function toggleSelect(title) {
-      if (selected.has(title)) {
-        selected.delete(title);
-      } else {
-        selected.add(title);
-      }
-      renderMovies();
-    }
-
-function promptSaveList() {
-  const selectedMovies = movies.filter(m => selected.has(m.title));
-  if (selectedMovies.length === 0) {
-    alert("Select at least one movie before saving.");
-    return;
-  }
-
-  const name = prompt("Enter a name for this list:");
-  if (!name || name.trim().length === 0) {
-    alert("List name is required.");
-    return;
-  }
-
-  const list = {
-    name: name.trim(),
-    movies: selectedMovies
-  };
-
-  fetch('/api/lists', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(list)
-  })
-    .then(res => {
-      if (!res.ok) {
-        return res.text().then(err => { throw new Error(err) });
-      }
-      alert("List saved!");
-      selected.clear();
-      fetchLists();
-      // Optionally reload this new list after saving
-      loadList(name.trim());
-    })
-    .catch(err => {
-      console.error("Failed to save list:", err.message);
-      alert("Error saving list: " + err.message);
-    });
-}
-
-// Load a saved list by name, update currentMovies and render
-async function loadList(name) {
-  if (!name) {
-    // If no list selected, revert to full library
+  async function fetchMovies() {
+    const res = await fetch('/api/movies');
+    movies = await res.json();
     currentMovies = movies;
     renderMovies();
-    return;
   }
-  try {
-    const res = await fetch(`/api/lists/get?name=${encodeURIComponent(name)}`);
-    if (!res.ok) throw new Error("Failed to load list");
-    const listMovies = await res.json();
-    currentMovies = listMovies;
+
+  async function fetchLists() {
+    const res = await fetch('/api/lists');
+    const lists = await res.json();
+    const dropdown = document.getElementById('listsDropdown');
+    dropdown.innerHTML = `<option value="">-- Select List --</option>`;
+    lists.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      dropdown.appendChild(opt);
+    });
+  }
+
+  function toggleView() {
+    gridMode = !gridMode;
+    const container = document.getElementById('movie-container');
+    container.className = gridMode ? 'grid' : 'list';
     renderMovies();
-  } catch (e) {
-    alert(`Error loading list: ${e.message}`);
   }
-}
 
-function goHome() {
-  currentMovies = movies;
-  document.getElementById('listsDropdown').value = "";
-  renderMovies();
-}
+  function renderMovies() {
+    const container = document.getElementById("movie-container");
+    container.innerHTML = "";
 
+    currentMovies.forEach(movie => {
+      const div = document.createElement("div");
+      div.className = "movie-tile";
+      if (selected.has(movie.title)) {
+        div.classList.add("selected");
+      }
 
-    fetchMovies();
-    fetchLists();
-  </script>
+      div.onclick = () => toggleSelect(movie.title);
+
+      const img = document.createElement("img");
+      img.src = movie.poster || movie.poster_url || "/web/placeholder.jpg";
+      img.alt = movie.title;
+
+      const label = document.createElement("p");
+      label.textContent = movie.title;
+
+      div.appendChild(img);
+      div.appendChild(label);
+      container.appendChild(div);
+    });
+  }
+
+  function toggleSelect(title) {
+    if (selected.has(title)) {
+      selected.delete(title);
+    } else {
+      selected.add(title);
+    }
+    renderMovies();
+  }
+
+  function promptSaveList() {
+    const selectedMovies = movies.filter(m => selected.has(m.title));
+    if (selectedMovies.length === 0) {
+      alert("Select at least one movie before saving.");
+      return;
+    }
+
+    const name = prompt("Enter a name for this list:");
+    if (!name || name.trim().length === 0) {
+      alert("List name is required.");
+      return;
+    }
+
+    const list = {
+      name: name.trim(),
+      movies: selectedMovies
+    };
+
+    fetch('/api/lists', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(list)
+    })
+      .then(res => {
+        if (!res.ok) {
+          return res.text().then(err => { throw new Error(err) });
+        }
+        alert("List saved!");
+        selected.clear();
+        fetchLists();
+        loadList(name.trim());
+      })
+      .catch(err => {
+        console.error("Failed to save list:", err.message);
+        alert("Error saving list: " + err.message);
+      });
+  }
+
+  async function loadList(name) {
+    if (!name) {
+      currentMovies = movies;
+      renderMovies();
+      return;
+    }
+    try {
+      const res = await fetch(`/api/lists/get?name=${encodeURIComponent(name)}`);
+      if (!res.ok) throw new Error("Failed to load list");
+      const listMovies = await res.json();
+      currentMovies = listMovies;
+      renderMovies();
+    } catch (e) {
+      alert(`Error loading list: ${e.message}`);
+    }
+  }
+
+  function goHome() {
+    currentMovies = movies;
+    document.getElementById('listsDropdown').value = "";
+    renderMovies();
+  }
+
+  fetchMovies();
+  fetchLists();
+</script>
 </body>
 </html>
