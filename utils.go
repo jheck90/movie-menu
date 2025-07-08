@@ -4,166 +4,157 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"net/http"
 	"os"
-	"strings"
+	"path/filepath"
+	"net/http"
 )
 
-// RadarrMovie represents a movie from Radarr API
-type RadarrMovie struct {
-	Title  string `json:"title"`
-	Year   int    `json:"year"`
-	TMDBID int    `json:"tmdbId"`
-	Images []struct {
-		CoverType string `json:"coverType"`
-		URL       string `json:"url"`
-	} `json:"images"`
+const (
+	configPath = "./config/config.json"
+	listsDir   = "./lists"
+)
+
+// AppConfig holds API keys and endpoints
+type AppConfig struct {
+	RadarrAPIKey string `json:"radarr_api_key"`
+	RadarrURL    string `json:"radarr_url"`
+	TVDBAPIKey   string `json:"tvdb_api_key"`
 }
 
-// FetchMoviesFromRadarr fetches movies from Radarr and creates a list
-func FetchMoviesFromRadarr(configPath, outputPath, listName string) error {
-	// Load config
-	configData, err := ioutil.ReadFile(configPath)
+// Movie represents a single movie entry
+type Movie struct {
+	Title     string `json:"title"`
+	PosterURL string `json:"poster_url"`
+	RadarrID  int    `json:"radarr_id"`
+}
+
+// MovieList represents a collection of movies
+type MovieList struct {
+	Title  string  `json:"title"`
+	Movies []Movie `json:"movies"`
+}
+
+// Global variables for use in app
+var (
+	Config     AppConfig
+	MovieMenus map[string]MovieList
+)
+
+// LoadConfig loads the config from file or creates default
+func LoadConfig() error {
+	data, err := ioutil.ReadFile(configPath)
+	if os.IsNotExist(err) {
+		// create default config.json if needed
+	} else if err != nil {
+		return err
+	} else {
+		if err := json.Unmarshal(data, &Config); err != nil {
+			return err
+		}
+	}
+
+	// Override with env vars if present
+	if key := os.Getenv("RADARR_API_KEY"); key != "" {
+		Config.RadarrAPIKey = key
+	}
+	if url := os.Getenv("RADARR_URL"); url != "" {
+		Config.RadarrURL = url
+	}
+	if key := os.Getenv("TVDB_API_KEY"); key != "" {
+		Config.TVDBAPIKey = key
+	}
+
+	return nil
+}
+
+
+// LoadMovieLists loads all movie lists from /root/lists
+func LoadMovieLists() error {
+	MovieMenus = make(map[string]MovieList)
+
+	files, err := filepath.Glob(filepath.Join(listsDir, "*.json"))
 	if err != nil {
-		return fmt.Errorf("error reading config: %v", err)
+		return fmt.Errorf("failed to list json files: %w", err)
 	}
-	
-	var config Config
-	if err := json.Unmarshal(configData, &config); err != nil {
-		return fmt.Errorf("error parsing config: %v", err)
+
+	for _, file := range files {
+		data, err := ioutil.ReadFile(file)
+		if err != nil {
+			fmt.Printf("Skipping file %s: %v\n", file, err)
+			continue
+		}
+
+		var list MovieList
+		if err := json.Unmarshal(data, &list); err != nil {
+			fmt.Printf("Skipping invalid JSON in %s: %v\n", file, err)
+			continue
+		}
+
+		name := filepath.Base(file)
+		name = name[:len(name)-len(filepath.Ext(name))] // remove .json
+		MovieMenus[name] = list
 	}
-	
-	// Fetch from Radarr
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", config.RadarrURL+"/api/v3/movie", nil)
+
+	return nil
+}
+
+// saveJSON is a helper to write any struct as indented JSON
+func saveJSON(path string, v interface{}) {
+	data, _ := json.MarshalIndent(v, "", "  ")
+	_ = ioutil.WriteFile(path, data, 0644)
+}
+
+func TestRadarrAPI() error {
+    req, err := http.NewRequest("GET", Config.RadarrURL+"/api/v3/movie", nil)
+    if err != nil {
+        return err
+    }
+    req.Header.Set("X-Api-Key", Config.RadarrAPIKey)
+
+    client := &http.Client{}
+    resp, err := client.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+
+    body, _ := ioutil.ReadAll(resp.Body)
+    fmt.Println("Radarr response:", string(body))
+    return nil
+}
+
+func TestTVDBAPI() error {
+	req, err := http.NewRequest("GET", "https://api.thetvdb.com/search/series?name=star%20wars", nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Add("X-Api-Key", config.RadarrAPIKey)
-	
+
+	req.Header.Set("Authorization", "Bearer "+Config.TVDBAPIKey)
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("error fetching from Radarr: %v", err)
+		return err
 	}
 	defer resp.Body.Close()
-	
-	var radarrMovies []RadarrMovie
-	if err := json.NewDecoder(resp.Body).Decode(&radarrMovies); err != nil {
-		return fmt.Errorf("error decoding response: %v", err)
-	}
-	
-	// Convert to our format
-	movieList := MovieList{
-		Name:   listName,
-		Movies: make([]Movie, 0),
-	}
-	
-	for _, rm := range radarrMovies {
-		movie := Movie{
-			ID:    rm.TMDBID,
-			Title: rm.Title,
-			Year:  rm.Year,
-		}
-		
-		// Find poster URL
-		for _, img := range rm.Images {
-			if img.CoverType == "poster" {
-				movie.PosterURL = img.URL
-				break
-			}
-		}
-		
-		movieList.Movies = append(movieList.Movies, movie)
-	}
-	
-	// Save to file
-	data, err := json.MarshalIndent(movieList, "", "  ")
-	if err != nil {
-		return err
-	}
-	
-	return ioutil.WriteFile(outputPath, data, 0644)
-}
 
-// FilterMoviesByTag filters movies suitable for kids based on common patterns
-func FilterMoviesByTag(inputPath, outputPath string, keywords []string) error {
-	data, err := ioutil.ReadFile(inputPath)
-	if err != nil {
-		return err
+	if resp.StatusCode != http.StatusOK {
+		body, _ := ioutil.ReadAll(resp.Body)
+		return fmt.Errorf("TVDB API error: %s - %s", resp.Status, string(body))
 	}
-	
-	var list MovieList
-	if err := json.Unmarshal(data, &list); err != nil {
-		return err
-	}
-	
-	filtered := MovieList{
-		Name:   list.Name + " (Filtered)",
-		Movies: make([]Movie, 0),
-	}
-	
-	for _, movie := range list.Movies {
-		include := false
-		titleLower := strings.ToLower(movie.Title)
-		
-		for _, keyword := range keywords {
-			if strings.Contains(titleLower, strings.ToLower(keyword)) {
-				include = true
-				break
-			}
-		}
-		
-		if include {
-			filtered.Movies = append(filtered.Movies, movie)
-		}
-	}
-	
-	data, err = json.MarshalIndent(filtered, "", "  ")
-	if err != nil {
-		return err
-	}
-	
-	return ioutil.WriteFile(outputPath, data, 0644)
-}
 
-// Command line utility
-func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("Usage:")
-		fmt.Println("  fetch-radarr <config.json> <output.json> <list-name>")
-		fmt.Println("  filter <input.json> <output.json> <keyword1> <keyword2> ...")
-		return
+	// Optional: parse response for debugging
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
 	}
-	
-	command := os.Args[1]
-	
-	switch command {
-	case "fetch-radarr":
-		if len(os.Args) < 5 {
-			fmt.Println("Usage: fetch-radarr <config.json> <output.json> <list-name>")
-			return
-		}
-		err := FetchMoviesFromRadarr(os.Args[2], os.Args[3], os.Args[4])
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("Movies fetched successfully!")
-		
-	case "filter":
-		if len(os.Args) < 4 {
-			fmt.Println("Usage: filter <input.json> <output.json> <keyword1> <keyword2> ...")
-			return
-		}
-		keywords := os.Args[4:]
-		err := FilterMoviesByTag(os.Args[2], os.Args[3], keywords)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Printf("Filtered movies with keywords: %v\n", keywords)
-		
-	default:
-		fmt.Printf("Unknown command: %s\n", command)
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return err
 	}
+
+	fmt.Println("TVDB API response sample:", result)
+	return nil
 }
