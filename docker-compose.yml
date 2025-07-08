@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  movie-menu:
+    build: .
+    container_name: movie-menu
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/root/config
+      - ./lists:/root/lists
+      - ./web:/root/web
+      - ./cache:/root/cache
+    environment:
+      - PORT=8080
+    restart: unless-stopped
+    networks:
+      - movie-menu-net
+
+networks:
+  movie-menu-net:
+    driver: bridge
